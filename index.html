@@ -3,1124 +3,717 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Kiosk Ordering System</title>
+    <title>Kiosk Order System - FRESH START</title>
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f9fafb; }
-        /* Style for full-screen PWA experience */
-        .pwa-full-screen { min-height: 100vh; } 
+        /* Custom styles for a cleaner mobile app look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        .app-container {
+            max-width: 600px;
+            margin: 0 auto;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: white;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
+        }
+        .main-content {
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+        .card {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+        }
+        .modal-bg {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
     </style>
-</head>
-<body class="pwa-full-screen">
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <div id="app">
-        <!-- Content loaded by JavaScript -->
-    </div>
+        // Set Firebase Log Level for debugging
+        setLogLevel('debug'); 
 
-    <script>
-        // --- 1. CONFIGURATION AND INITIAL STATE ---
+        // --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // **CRITICAL CHANGE**: This unique ID forces the app to create a new, clean database path.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'kiosk-fresh-start-v4'; 
+        
+        window.fb = {
+            db: null,
+            auth: null,
+            userId: null,
+            appId: appId,
+            isAuthReady: false,
+            // Function placeholders will be populated later
+            dbRef: (path) => doc(window.fb.db, path), 
+            settingsCollectionRef: () => collection(window.fb.db, `/artifacts/${window.fb.appId}/public/data/settings`),
+            menuCollectionRef: () => collection(window.fb.db, `/artifacts/${window.fb.appId}/public/data/menu`),
+        };
 
-        // Lucide icons setup (manual rendering for pure JS)
-        function renderIcons() {
-            lucide.createIcons();
-        }
-
-        const INITIAL_KIOSK_DATA = {
-            menuItems: [
-                { id: "1", name: "Classic Burger", description: "Juicy beef patty with lettuce, tomato, and special sauce", price: 12.99, category: "Food", image: "https://images.unsplash.com/photo-1550547660-d9450f859349?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxnb3VybWV0JTIwYnVyZ2VyfGVufDF8fHx8MTc2NDIxMDg2M3ww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral", customizationOptions: [{ name: "Cheese", default: true }, { name: "Bacon", default: false }] },
-                { id: "4", name: "Cappuccino", description: "Rich espresso with steamed milk and foam", price: 4.99, category: "Beverage", image: "https://images.unsplash.com/photo-1592663527359-cf6642f54cff?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHxjYXBtY2Npbm98ZW58MXx8fHwxNzY0MTkzNDI0fDA&lib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral", customizationOptions: [{ name: "Oat Milk", default: false }, { name: "Extra Shot", default: false }] },
-                { id: "5", name: "Caesar Salad", description: "Crisp romaine, Parmesan cheese, croutons, and Caesar dressing.", price: 9.50, category: "Food", image: "https://images.unsplash.com/photo-1610444310574-d47f9f36f6d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYWVzYXIlMjBzYWxhZHxlbnwxfHx8fDE3MjEwNjQzNDR8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral", customizationOptions: [{ name: "Chicken", default: false }, { name: "Extra Dressing", default: true }] },
-                { id: "6", name: "Iced Tea", description: "Freshly brewed iced black tea, unsweetened.", price: 2.99, category: "Beverage", image: "https://images.unsplash.com/photo-1546761405-c32f05a9f939?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpY2VkJTIwdGVhfGVufDF8fHx8MTcyMTA2NDM3M3ww&lib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral", customizationOptions: [{ name: "Lemon Slice", default: true }, { name: "Sweetener", default: false }] }
-            ],
-            categories: ["Food", "Beverage"],
-            kioskName: "Local Kiosk System",
-            adminPin: "12345",
+        const defaultSettings = {
+            kioskName: "Kiosk Order System - FRESH START", // Visually confirm the new version is loading
             tableNumber: "1A",
+            adminPin: "1234", // Default PIN is set for the fresh start
+            categories: [
+                { id: 'all', name: 'All' },
+                { id: 'food', name: 'Food' },
+                { id: 'beverage', name: 'Beverage' },
+            ],
+            taxRate: 10, // 10% tax
+            currencySymbol: '$'
         };
 
-        let appState = {
-            kioskData: JSON.parse(localStorage.getItem('kioskData')) || INITIAL_KIOSK_DATA,
+        const defaultMenuItems = [
+            { id: 'item1', name: 'Classic Burger', description: 'Juicy beef patty with lettuce, tomato, and special sauce.', price: 12.99, image: 'https://placehold.co/150x150/555/FFF?text=Burger', categoryId: 'food' },
+            { id: 'item2', name: 'Fresh Pasta', description: 'House-made pasta with marinara sauce and fresh basil.', price: 15.99, image: 'https://placehold.co/150x150/888/FFF?text=Pasta', categoryId: 'food' },
+            { id: 'item3', name: 'Fresh Orange Juice', description: 'Freshly squeezed orange juice.', price: 5.99, image: 'https://placehold.co/150x150/F80/FFF?text=Juice', categoryId: 'beverage' },
+            { id: 'item4', name: 'Cappuccino', description: 'Rich espresso with steamed milk and foam.', price: 4.99, image: 'https://placehold.co/150x150/444/FFF?text=Coffee', categoryId: 'beverage' },
+        ];
+
+
+        async function initializeFirebase() {
+            try {
+                if (!firebaseConfig) {
+                    console.error("Firebase config not available.");
+                    return;
+                }
+                const app = initializeApp(firebaseConfig);
+                window.fb.db = getFirestore(app);
+                window.fb.auth = getAuth(app);
+
+                // 1. Authenticate
+                if (initialAuthToken) {
+                    await signInWithCustomToken(window.fb.auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(window.fb.auth);
+                }
+
+                onAuthStateChanged(window.fb.auth, (user) => {
+                    if (user) {
+                        window.fb.userId = user.uid;
+                    } else {
+                        window.fb.userId = crypto.randomUUID(); // Fallback for anonymous
+                    }
+                    window.fb.isAuthReady = true;
+                    console.log(`Auth Ready. User ID: ${window.fb.userId}. App ID: ${window.fb.appId}`);
+                    // Start listeners once auth is ready
+                    startDataListeners();
+                });
+
+            } catch (error) {
+                console.error("Error during Firebase initialization:", error);
+                document.getElementById('app-status').textContent = `Initialization Error: ${error.message}`;
+            }
+        }
+
+        async function initializeDefaultData() {
+            if (!window.fb.isAuthReady) return;
+
+            const settingsDocRef = window.fb.dbRef(`artifacts/${window.fb.appId}/public/data/settings/app`);
+            const settingsSnap = await getDoc(settingsDocRef);
+
+            if (!settingsSnap.exists()) {
+                console.log("No settings found. Initializing defaults.");
+                await setDoc(settingsDocRef, defaultSettings);
+
+                // Initialize menu items
+                const batchPromises = defaultMenuItems.map(item => {
+                    return setDoc(window.fb.dbRef(`artifacts/${window.fb.appId}/public/data/menu/${item.id}`), item);
+                });
+                await Promise.all(batchPromises);
+                console.log("Default menu and settings initialized.");
+            }
+        }
+        
+        function startDataListeners() {
+            if (!window.fb.isAuthReady) return;
+
+            // 1. Settings Listener
+            const settingsDocRef = window.fb.dbRef(`artifacts/${window.fb.appId}/public/data/settings/app`);
+            onSnapshot(settingsDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    window.app.settings = docSnap.data();
+                    window.app.render();
+                } else {
+                    // Initialize if settings are missing (first run)
+                    initializeDefaultData();
+                }
+            });
+
+            // 2. Menu Items Listener
+            const menuQ = query(window.fb.menuCollectionRef());
+            onSnapshot(menuQ, (querySnapshot) => {
+                const items = [];
+                querySnapshot.forEach((doc) => {
+                    items.push({ id: doc.id, ...doc.data() });
+                });
+                window.app.menuItems = items;
+                window.app.render();
+            });
+        }
+
+        // --- GLOBAL APP STATE AND RENDERER ---
+        window.app = {
+            view: 'menu', // 'menu' or 'admin'
+            settings: defaultSettings,
+            menuItems: [],
             cart: [],
-            isAdminMode: true,
-            isCartOpen: false,
-            orderSubmitted: false,
-            activeCategory: 'All',
-            activeAdminTab: 'Settings',
-            modalOpen: false, // Used for Pin Dialog and Customization Modal
-            modalType: null, // 'pin' or 'customize'
-            itemToCustomize: null, // Item object for customization modal
-            pinInput: '',
-            pinError: false,
-            itemToEdit: null, // Item object for Admin editing
-            isItemEditorOpen: false,
-        };
+            activeCategory: 'all',
+            modal: {
+                visible: false,
+                type: null, // 'admin-login', 'customize', 'order-submit', 'edit-item', 'add-item', 'edit-settings'
+                data: null, // Data related to the modal (e.g., item being customized)
+                message: null, // General message for modals
+            },
 
-        // --- 2. STATE MANAGEMENT & DATA PERSISTENCE ---
+            // --- State Management ---
+            set(key, value) {
+                this[key] = value;
+                this.render();
+            },
 
-        function saveKioskData() {
-            // Save configuration data to local storage for persistence across reloads
-            localStorage.setItem('kioskData', JSON.stringify(appState.kioskData));
-        }
+            // --- Cart Logic ---
+            addToCart(item, customizations = {}) {
+                const customizationString = Object.values(customizations).join('|');
+                const cartItemId = `${item.id}-${Date.now()}`;
 
-        function setState(newState) {
-            Object.assign(appState, newState);
-            renderApp();
-        }
-
-        function resetKioskData() {
-            appState.kioskData = INITIAL_KIOSK_DATA;
-            saveKioskData();
-        }
-
-        // --- 3. UTILITY FUNCTIONS ---
-
-        function formatPrice(price) {
-            return price.toFixed(2);
-        }
-
-        function getCartTotals() {
-            const subtotal = appState.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-            const taxRate = 0.10;
-            const tax = subtotal * taxRate;
-            const total = subtotal + tax;
-            const totalItems = appState.cart.reduce((sum, item) => sum + item.quantity, 0);
-            return { subtotal, tax, total, taxRate, totalItems };
-        }
-
-        // --- 4. VIEWS (RENDERERS) ---
-
-        // Basic Button Component HTML
-        function Button({ children, onClick, variant = 'default', size = 'default', className = '', disabled = false, type = 'button' }) {
-            let baseStyles = 'rounded-lg font-semibold transition duration-150 transform active:scale-95 flex items-center justify-center whitespace-nowrap';
-            let variantStyles;
-            let sizeStyles;
-
-            switch (variant) {
-                case 'outline':
-                    variantStyles = 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100';
-                    break;
-                case 'ghost':
-                    variantStyles = 'bg-transparent text-gray-700 hover:bg-gray-100';
-                    break;
-                case 'destructive':
-                    variantStyles = 'bg-red-500 text-white hover:bg-red-600 shadow-md';
-                    break;
-                case 'secondary':
-                    variantStyles = 'bg-gray-200 text-gray-800 hover:bg-gray-300 shadow-sm';
-                    break;
-                case 'default':
-                default:
-                    variantStyles = 'bg-gray-800 text-white hover:bg-gray-700 shadow-md';
-                    break;
-            }
-
-            switch (size) {
-                case 'icon':
-                    sizeStyles = 'w-9 h-9 p-2';
-                    break;
-                case 'sm':
-                    sizeStyles = 'px-3 py-1.5 text-sm';
-                    break;
-                case 'lg':
-                    sizeStyles = 'px-6 py-3 text-lg';
-                    break;
-                case 'default':
-                default:
-                    sizeStyles = 'px-4 py-2';
-                    break;
-            }
-
-            return `<button type="${type}" onclick="${disabled ? '' : onClick}" class="${baseStyles} ${variantStyles} ${sizeStyles} ${className} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}" ${disabled ? 'disabled' : ''}>${children}</button>`;
-        }
-
-        // Modal Component HTML
-        function Modal({ children, title, onClose, className = '' }) {
-            if (!appState.modalOpen && !appState.isItemEditorOpen) return '';
-
-            const isItemEditor = appState.isItemEditorOpen;
-            const closeHandler = isItemEditor ? 'closeItemEditor()' : onClose;
-            const currentTitle = isItemEditor ? 'Edit Item' : title;
-
-            return `
-                <div class="fixed inset-0 bg-black bg-opacity-40 z-[99] flex items-center justify-center p-4">
-                    <div class="bg-white rounded-xl w-full max-w-lg shadow-2xl transition-all duration-300 transform scale-100 ${className}">
-                        <div class="p-6 border-b flex justify-between items-center">
-                            <h3 class="text-xl font-bold text-gray-900">${currentTitle}</h3>
-                            ${Button({
-                                variant: 'ghost',
-                                size: 'icon',
-                                onClick: closeHandler,
-                                children: '<i data-lucide="x" class="w-5 h-5"></i>'
-                            })}
-                        </div>
-                        ${children}
-                    </div>
-                </div>
-            `;
-        }
-        
-        // --- ADMIN PANEL EDITOR ---
-        function renderItemEditorModal() {
-            const item = appState.itemToEdit || {
-                id: (Date.now() + Math.random()).toString(),
-                name: '',
-                description: '',
-                price: 0.00,
-                category: appState.kioskData.categories[0] || 'Food',
-                image: '',
-                customizationOptions: [],
-            };
-            const isNew = !appState.kioskData.menuItems.find(i => i.id === item.id);
-            const title = isNew ? "Add New Menu Item" : `Edit ${item.name || 'Item'}`;
-
-            // Helper to handle input changes without full re-render on every key stroke (optimistic update needed)
-            function updateTempItem(key, value) {
-                appState.itemToEdit = {
-                    ...(appState.itemToEdit || item),
-                    [key]: value
-                };
-            }
+                this.cart.push({
+                    cartId: cartItemId,
+                    itemId: item.id,
+                    name: item.name,
+                    price: item.price,
+                    customizations: customizations,
+                    customizationString: customizationString,
+                });
+                this.render();
+                this.closeModal();
+                this.modal.message = { title: "Added to Order", text: `${item.name} added to your order!` };
+                this.openModal('message');
+            },
+            removeFromCart(cartId) {
+                this.cart = this.cart.filter(item => item.cartId !== cartId);
+                this.render();
+            },
+            getCartTotal() {
+                const subtotal = this.cart.reduce((sum, item) => sum + item.price, 0);
+                const tax = subtotal * (this.settings.taxRate / 100);
+                return { subtotal, tax, total: subtotal + tax };
+            },
+            clearCart() {
+                this.cart = [];
+                this.render();
+            },
             
-            // Helper to get the current state of the item being edited (handles live edits)
-            const getCurrentItem = () => appState.kioskData.menuItems.find(i => i.id === item.id) || appState.itemToEdit || item;
+            // --- Modal Logic ---
+            openModal(type, data = null) {
+                this.modal.type = type;
+                this.modal.data = data;
+                this.modal.visible = true;
+                this.render();
+            },
+            closeModal() {
+                this.modal.visible = false;
+                this.modal.type = null;
+                this.modal.data = null;
+                this.modal.message = null;
+                this.render();
+            },
 
-            function renderOptions() {
-                const currentItem = getCurrentItem();
-                const options = currentItem.customizationOptions || [];
-                let html = options.map(opt => `
-                    <div key="${opt.name}" class="flex items-center space-x-2 bg-gray-50 p-3 rounded-lg border">
-                        <span class="flex-1 text-gray-700">${opt.name}</span>
-                        ${Button({
-                            type: 'button',
-                            variant: opt.default ? 'default' : 'outline',
-                            size: 'sm',
-                            className: 'text-xs',
-                            onClick: `toggleOptionDefault('${item.id}', '${opt.name}')`,
-                            children: opt.default ? 'Default/Included' : 'Optional/Add-on'
-                        })}
-                        ${Button({
-                            type: 'button',
-                            variant: 'destructive',
-                            size: 'icon',
-                            onClick: `removeOption('${item.id}', '${opt.name}')`,
-                            children: '<i data-lucide="trash-2" class="w-4 h-4"></i>'
-                        })}
-                    </div>
-                `).join('');
+            // --- Rendering ---
+            render() {
+                const root = document.getElementById('app-container');
+                root.innerHTML = this.renderApp();
 
-                // Input for new option (needs to be managed outside of this function's scope)
-                html += `
-                    <div class="flex space-x-2 pt-2">
-                        <input type="text" id="newOptionName" placeholder="New option name (e.g., Ketchup, Oat Milk)"
-                            class="flex-1 rounded-lg border-gray-300 shadow-sm p-3 border focus:border-indigo-500" />
-                        ${Button({
-                            type: 'button',
-                            variant: 'secondary',
-                            onClick: `addOption('${item.id}')`,
-                            children: '<i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i> Add'
-                        })}
-                    </div>
-                `;
-                return html;
-            }
+                // Attach event listeners after rendering
+                this.attachEventListeners();
+            },
 
-            // Function to handle form submission
-            function handleSubmit() {
-                const form = document.getElementById('itemEditorForm');
-                const formData = new FormData(form);
-                const newItem = {
-                    id: item.id,
-                    name: formData.get('name'),
-                    description: formData.get('description'),
-                    price: parseFloat(formData.get('price')) || 0.00,
-                    category: formData.get('category'),
-                    image: formData.get('image'),
-                    // Customization options are handled separately via appState.itemToEdit
-                    customizationOptions: (appState.itemToEdit || item).customizationOptions || [] 
-                };
+            attachEventListeners() {
+                // Attach listeners for modal close
+                const closeButtons = document.querySelectorAll('.modal-close-btn');
+                closeButtons.forEach(btn => btn.onclick = () => this.closeModal());
                 
-                // Final save logic
-                saveItem(newItem);
-                closeItemEditor();
-            }
-            
-            // Override the default Modal HTML structure to inject the form and event listeners
-            return `
-                <div class="fixed inset-0 bg-black bg-opacity-40 z-[99] flex items-center justify-center p-4">
-                    <div class="bg-white rounded-xl w-full max-w-lg shadow-2xl transition-all duration-300 transform scale-100">
-                        <div class="p-6 border-b flex justify-between items-center">
-                            <h3 class="text-xl font-bold text-gray-900">${title}</h3>
-                            ${Button({
-                                variant: 'ghost',
-                                size: 'icon',
-                                onClick: `closeItemEditor()`,
-                                children: '<i data-lucide="x" class="w-5 h-5"></i>'
-                            })}
+                // --- Menu View Listeners ---
+                if (this.view === 'menu') {
+                    // Category buttons
+                    const categoryButtons = document.querySelectorAll('[data-category-id]');
+                    categoryButtons.forEach(btn => btn.onclick = (e) => this.set('activeCategory', e.target.dataset.categoryId));
+
+                    // Add to Cart buttons (opens customize modal)
+                    const addToCartButtons = document.querySelectorAll('[data-item-id]');
+                    addToCartButtons.forEach(btn => btn.onclick = (e) => {
+                        const itemId = e.target.closest('[data-item-id]').dataset.itemId;
+                        const item = this.menuItems.find(i => i.id === itemId);
+                        if (item) {
+                            this.addToCart(item); // Simple add to cart (no customization in this basic version)
+                        }
+                    });
+
+                    // Remove from Cart buttons
+                    const removeButtons = document.querySelectorAll('[data-remove-cart-id]');
+                    removeButtons.forEach(btn => btn.onclick = (e) => this.removeFromCart(e.target.dataset.removeCartId));
+
+                    // Submit Order
+                    const submitOrderBtn = document.getElementById('submit-order-btn');
+                    if (submitOrderBtn) submitOrderBtn.onclick = () => this.openModal('order-submit');
+
+                    // Admin Login
+                    const adminBtn = document.getElementById('admin-login-btn');
+                    if (adminBtn) adminBtn.onclick = () => this.openModal('admin-login');
+                }
+                
+                // --- Admin View Listeners ---
+                if (this.view === 'admin') {
+                    // Exit Admin
+                    const exitAdminBtn = document.getElementById('exit-admin-btn');
+                    if (exitAdminBtn) exitAdminBtn.onclick = () => this.set('view', 'menu');
+                    
+                    // Edit Settings Button
+                    const editSettingsBtn = document.getElementById('edit-settings-btn');
+                    if (editSettingsBtn) editSettingsBtn.onclick = () => this.openModal('edit-settings', this.settings);
+                    
+                    // Delete Item
+                    const deleteButtons = document.querySelectorAll('[data-delete-item-id]');
+                    deleteButtons.forEach(btn => btn.onclick = async (e) => {
+                        const itemId = e.target.dataset.deleteItemId;
+                        if (confirm(`Are you sure you want to delete item ${itemId}?`)) {
+                            await deleteMenuItem(itemId);
+                        }
+                    });
+                }
+
+                // --- Modal Form Listeners ---
+                // Admin Login Form
+                const adminForm = document.getElementById('admin-login-form');
+                if (adminForm) {
+                    adminForm.onsubmit = (e) => {
+                        e.preventDefault();
+                        const pin = document.getElementById('admin-pin-input').value;
+                        this.handleAdminLogin(pin);
+                    };
+                }
+                
+                // Order Submit (Confirmation)
+                const confirmOrderBtn = document.getElementById('confirm-order-btn');
+                if (confirmOrderBtn) confirmOrderBtn.onclick = () => this.handleOrderSubmission();
+
+                // Settings Form Submission
+                const settingsForm = document.getElementById('settings-form');
+                if (settingsForm) {
+                    settingsForm.onsubmit = (e) => {
+                        e.preventDefault();
+                        const newSettings = {
+                            kioskName: document.getElementById('kioskName').value,
+                            tableNumber: document.getElementById('tableNumber').value,
+                            adminPin: document.getElementById('adminPin').value,
+                            taxRate: parseFloat(document.getElementById('taxRate').value) || 0,
+                            currencySymbol: document.getElementById('currencySymbol').value,
+                        };
+                        updateSettings(newSettings);
+                        this.closeModal();
+                    };
+                }
+            },
+
+            // --- Handler Functions ---
+            handleAdminLogin(pin) {
+                if (pin === this.settings.adminPin) {
+                    this.set('view', 'admin');
+                    this.closeModal();
+                } else {
+                    this.modal.message = { title: "Login Failed", text: "Incorrect Admin PIN." };
+                    this.openModal('message');
+                }
+            },
+
+            handleOrderSubmission() {
+                if (this.cart.length === 0) return;
+                
+                // In a real app, this would send the order to a server.
+                console.log("Order Submitted:", this.cart);
+                
+                // Show order confirmation modal
+                this.modal.data = { order: [...this.cart], total: this.getCartTotal() };
+                this.clearCart();
+                this.openModal('order-submitted');
+            },
+
+            // --- Renderers ---
+            renderHeader() {
+                const settings = this.settings;
+                return `
+                    <div class="p-4 bg-white border-b border-gray-200 sticky top-0 z-10">
+                        <div class="flex justify-between items-center">
+                            <h1 class="text-2xl font-bold text-gray-800">${settings.kioskName}</h1>
+                            <div class="flex items-center space-x-3">
+                                <span class="text-sm font-medium text-gray-500">Table: ${settings.tableNumber}</span>
+                                <button id="admin-login-btn" class="p-2 text-gray-500 hover:text-indigo-600 focus:outline-none">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.545.337 1.25.12 1.724-1.066z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                </button>
+                            </div>
                         </div>
-                        
-                        <form id="itemEditorForm" onsubmit="event.preventDefault(); handleSubmitItemEditor();" class="p-6 max-h-[75vh] overflow-y-auto">
-                            <div class="space-y-4">
-                                <label class="block">
-                                    <span class="text-sm font-medium text-gray-700">Name</span>
-                                    <input type="text" name="name" value="${item.name}" required
-                                        class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 border focus:border-indigo-500" />
-                                </label>
-                                <label class="block">
-                                    <span class="text-sm font-medium text-gray-700">Description</span>
-                                    <textarea name="description" required
-                                        class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 border focus:border-indigo-500">${item.description}</textarea>
-                                </label>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <label class="block">
-                                        <span class="text-sm font-medium text-gray-700">Price ($)</span>
-                                        <input type="number" name="price" value="${item.price}" required step="0.01"
-                                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 border focus:border-indigo-500" />
-                                    </label>
-                                    <label class="block">
-                                        <span class="text-sm font-medium text-gray-700">Category</span>
-                                        <select name="category" required
-                                            class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 border bg-white focus:border-indigo-500">
-                                            ${appState.kioskData.categories.map(cat => `<option value="${cat}" ${item.category === cat ? 'selected' : ''}>${cat}</option>`).join('')}
-                                        </select>
-                                    </label>
-                                </div>
-                                <label class="block">
-                                    <span class="text-sm font-medium text-gray-700">Image URL</span>
-                                    <input type="url" name="image" value="${item.image}"
-                                        class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 border focus:border-indigo-500" />
-                                </label>
-
-                                <div class="pt-4 border-t border-gray-200">
-                                    <h4 class="text-lg font-bold text-gray-800 mb-3">Customization Options (Ingredients)</h4>
-                                    <div class="space-y-2 mb-4" id="customizationOptionsContainer">
-                                        ${renderOptions()}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="mt-6 flex justify-end space-x-3 border-t pt-4">
-                                ${Button({ type: 'button', variant: 'outline', onClick: 'closeItemEditor()', children: 'Cancel' })}
-                                ${Button({ type: 'submit', variant: 'default', children: '<i data-lucide="save" class="w-5 h-5 mr-2"></i> Save Item' })}
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Expose function for the form submit to call
-        window.handleSubmitItemEditor = function() {
-            const form = document.getElementById('itemEditorForm');
-            const formData = new FormData(form);
-            const item = appState.itemToEdit; // The base item (may be an existing one or a temporary new one)
-            
-            // Find the *actual* item in the menu or use the temporary state for options
-            const currentOptions = appState.itemToEdit.customizationOptions || [];
-
-            const newItem = {
-                id: item.id,
-                name: formData.get('name'),
-                description: formData.get('description'),
-                price: parseFloat(formData.get('price')) || 0.00,
-                category: formData.get('category'),
-                image: formData.get('image'),
-                customizationOptions: currentOptions
-            };
-            
-            let newItems;
-            const index = appState.kioskData.menuItems.findIndex(i => i.id === newItem.id);
-            if (index >= 0) {
-                // Update existing item
-                newItems = appState.kioskData.menuItems.map((i, idx) => (idx === index ? newItem : i));
-            } else {
-                // Add new item
-                newItems = [...appState.kioskData.menuItems, newItem];
-            }
-
-            appState.kioskData.menuItems = newItems;
-            saveKioskData();
-            closeItemEditor();
-        }
-
-        window.openItemEditor = function(itemId = null) {
-            appState.isItemEditorOpen = true;
-            if (itemId) {
-                appState.itemToEdit = appState.kioskData.menuItems.find(i => i.id === itemId);
-                // Create a deep copy for customization editing in admin mode
-                appState.itemToEdit = JSON.parse(JSON.stringify(appState.itemToEdit)); 
-            } else {
-                appState.itemToEdit = {
-                    id: (Date.now() + Math.random()).toString(),
-                    name: '',
-                    description: '',
-                    price: 0.00,
-                    category: appState.kioskData.categories[0] || 'Food',
-                    image: '',
-                    customizationOptions: [],
-                };
-            }
-            renderApp();
-        }
-        
-        window.closeItemEditor = function() {
-            appState.isItemEditorOpen = false;
-            appState.itemToEdit = null;
-            renderApp();
-        }
-
-        // Functions for customization management inside the admin editor
-        window.toggleOptionDefault = function(itemId, optionName) {
-            if (!appState.itemToEdit || appState.itemToEdit.id !== itemId) return;
-            appState.itemToEdit.customizationOptions = appState.itemToEdit.customizationOptions.map(opt => 
-                opt.name === optionName ? { ...opt, default: !opt.default } : opt
-            );
-            renderApp(); // Rerender to show updated option state
-        }
-
-        window.removeOption = function(itemId, optionName) {
-            if (!appState.itemToEdit || appState.itemToEdit.id !== itemId) return;
-            appState.itemToEdit.customizationOptions = appState.itemToEdit.customizationOptions.filter(opt => opt.name !== optionName);
-            renderApp();
-        }
-        
-        window.addOption = function(itemId) {
-            if (!appState.itemToEdit || appState.itemToEdit.id !== itemId) return;
-            const newOptionName = document.getElementById('newOptionName').value.trim();
-            if (newOptionName && !appState.itemToEdit.customizationOptions.some(opt => opt.name === newOptionName)) {
-                appState.itemToEdit.customizationOptions.push({ name: newOptionName, default: false });
-                document.getElementById('newOptionName').value = ''; // Clear input
-                renderApp();
-            }
-        }
-        
-        // --- ADMIN PANEL RENDERING ---
-
-        function renderAdminSettingsTab() {
-             const kiosk = appState.kioskData;
-            
-            function renderCategories() {
-                let html = kiosk.categories.map(cat => `
-                    <div key="${cat}" class="flex justify-between items-center bg-white p-3 rounded-lg border">
-                        <span class="font-medium text-gray-700">${cat}</span>
-                        ${Button({ variant: 'destructive', size: 'sm', onClick: `deleteCategory('${cat}')`, children: '<i data-lucide="trash-2" class="w-4 h-4"></i>' })}
-                    </div>
-                `).join('');
-
-                html += `
-                    <div class="flex space-x-2 pt-2">
-                        <input type="text" id="newCategoryInput" placeholder="New category name"
-                            class="flex-1 rounded-lg border-gray-300 p-3 border focus:border-indigo-500" />
-                        ${Button({
-                            variant: 'secondary',
-                            onClick: `addCategory()`,
-                            children: '<i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i> Add Category'
-                        })}
+                        <!-- Categories/Filter Tabs -->
+                        <div class="mt-4 flex space-x-2 overflow-x-auto pb-1">
+                            ${settings.categories.map(cat => `
+                                <button data-category-id="${cat.id}"
+                                    class="py-2 px-4 rounded-full text-sm font-medium transition duration-150 ease-in-out whitespace-nowrap
+                                    ${this.activeCategory === cat.id ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">
+                                    ${cat.name}
+                                </button>
+                            `).join('')}
+                        </div>
                     </div>
                 `;
-                return html;
-            }
+            },
 
-            return `
-                <div class="p-4 space-y-6">
-                    <h3 class="text-xl font-bold text-gray-800">General Settings</h3>
-                    <div class="space-y-4 bg-gray-50 p-4 rounded-lg border">
-                        <label class="block">
-                            <span class="text-sm font-medium text-gray-700">Kiosk Name</span>
-                            <input type="text" id="kioskNameInput" value="${kiosk.kioskName}"
-                                class="mt-1 block w-full rounded-lg border-gray-300 p-3 border focus:border-indigo-500" />
-                        </label>
-                        <label class="block">
-                            <span class="text-sm font-medium text-gray-700">Table Number Default</span>
-                            <input type="text" id="tableNumberInput" value="${kiosk.tableNumber}"
-                                class="mt-1 block w-full rounded-lg border-gray-300 p-3 border focus:border-indigo-500" />
-                        </label>
-                        <label class="block">
-                            <span class="text-sm font-medium text-gray-700">Admin PIN</span>
-                            <input type="password" id="adminPinInput" value="${kiosk.adminPin}"
-                                class="mt-1 block w-full rounded-lg border-gray-300 p-3 border focus:border-indigo-500" />
-                        </label>
-                        ${Button({ onClick: 'saveSettings()', className: 'w-full', children: 'Save Settings' })}
-                        
-                        <div class="pt-4 border-t border-gray-200">
-                             ${Button({ onClick: 'handleResetData()', variant: 'destructive', className: 'w-full mt-2', children: '<i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i> Reset to Default Data' })}
-                            <p class="text-xs text-center text-red-500 mt-1">This will erase all current items and settings.</p>
-                        </div>
-                    </div>
-
-                    <h3 class="text-xl font-bold text-gray-800 pt-4 border-t">Menu Categories</h3>
-                    <div class="space-y-3">
-                         ${renderCategories()}
-                    </div>
-                </div>
-            `;
-        }
-        
-        window.saveSettings = function() {
-            const newKioskData = {
-                ...appState.kioskData,
-                kioskName: document.getElementById('kioskNameInput').value,
-                tableNumber: document.getElementById('tableNumberInput').value,
-                adminPin: document.getElementById('adminPinInput').value
-            };
-            setState({ kioskData: newKioskData });
-            saveKioskData();
-            console.log("Settings saved.");
-        }
-        
-        window.handleResetData = function() {
-            if (confirm("WARNING: Are you sure you want to reset ALL menu items and settings to the default template? This action is irreversible.")) {
-                resetKioskData();
-                renderApp();
-            }
-        }
-
-        window.addCategory = function() {
-            const newCategory = document.getElementById('newCategoryInput').value.trim();
-            if (newCategory && !appState.kioskData.categories.includes(newCategory)) {
-                appState.kioskData.categories.push(newCategory);
-                document.getElementById('newCategoryInput').value = ''; // Clear input
-                saveKioskData();
-                renderApp();
-            }
-        }
-        
-        window.deleteCategory = function(catToDelete) {
-             if (appState.kioskData.menuItems.some(item => item.category === catToDelete)) {
-                alert(`Cannot delete category "${catToDelete}". Please move or delete all items in this category first.`);
-                return;
-            }
-            appState.kioskData.categories = appState.kioskData.categories.filter(cat => cat !== catToDelete);
-            saveKioskData();
-            renderApp();
-        }
-
-        function renderAdminMenuItemsTab() {
-            const groupedItems = appState.kioskData.menuItems.reduce((acc, item) => {
-                const category = item.category || 'Uncategorized';
-                if (!acc[category]) { acc[category] = []; }
-                acc[category].push(item);
-                return acc;
-            }, {});
-
-            let sections = Object.keys(groupedItems).map(category => `
-                <section>
-                    <h3 class="text-xl font-bold text-gray-700 mb-4">${category}</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        ${groupedItems[category].map(item => `
-                            <div class="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex shadow-sm">
-                                <img src="${item.image}" alt="${item.name}" class="w-24 h-24 object-cover flex-shrink-0" onerror="this.onerror=null;this.src='https://placehold.co/100x100/A0AEC0/FFFFFF?text=${item.name.slice(0, 1)}';" />
-                                <div class="flex-grow p-3 flex flex-col justify-between">
-                                    <div>
-                                        <p class="font-semibold text-gray-800">${item.name}</p>
-                                        <p class="text-sm text-gray-600">$${formatPrice(item.price)}</p>
-                                    </div>
-                                    <div class="flex space-x-2 mt-2">
-                                        ${Button({ variant: 'outline', size: 'sm', onClick: `openItemEditor('${item.id}')`, children: '<i data-lucide="pencil" class="w-4 h-4 mr-1"></i> Edit' })}
-                                        ${Button({ variant: 'destructive', size: 'sm', onClick: `deleteItem('${item.id}')`, children: '<i data-lucide="trash-2" class="w-4 h-4"></i>' })}
+            renderMenu() {
+                const settings = this.settings;
+                const filteredItems = this.menuItems.filter(item => 
+                    this.activeCategory === 'all' || item.categoryId === this.activeCategory
+                );
+                
+                return `
+                    <div class="p-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                        ${filteredItems.map(item => `
+                            <div class="card bg-white rounded-xl overflow-hidden transform hover:scale-[1.01] transition duration-200 ease-in-out">
+                                <img src="${item.image}" alt="${item.name}" class="w-full h-40 object-cover" onerror="this.onerror=null;this.src='https://placehold.co/400x160/cccccc/333333?text=Image+Missing';">
+                                <div class="p-4">
+                                    <h3 class="text-xl font-semibold text-gray-900 truncate">${item.name}</h3>
+                                    <p class="text-sm text-gray-500 mt-1 line-clamp-2">${item.description}</p>
+                                    <div class="flex justify-between items-center mt-3">
+                                        <span class="text-2xl font-bold text-indigo-600">${settings.currencySymbol}${item.price.toFixed(2)}</span>
+                                        <button data-item-id="${item.id}"
+                                            class="bg-indigo-600 text-white py-2 px-4 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 ease-in-out shadow-lg shadow-indigo-500/50">
+                                            Add to Order
+                                        </button>
                                     </div>
                                 </div>
                             </div>
                         `).join('')}
+                        ${filteredItems.length === 0 ? '<p class="text-center text-gray-500 col-span-full py-10">No items in this category.</p>' : ''}
                     </div>
-                </section>
-            `).join('');
-
-            return `
-                <div class="p-4 space-y-6">
-                    ${Button({ onClick: 'openItemEditor()', className: 'w-full flex items-center justify-center', children: '<i data-lucide="plus-square" class="w-5 h-5 mr-2"></i> Add New Item' })}
-                    <div class="space-y-8">
-                        ${sections}
-                    </div>
-                </div>
-            `;
-        }
-        
-        window.deleteItem = function(itemId) {
-            if (confirm("Are you sure you want to delete this item?")) {
-                appState.kioskData.menuItems = appState.kioskData.menuItems.filter(item => item.id !== itemId);
-                saveKioskData();
-                renderApp();
-            }
-        }
-
-        function renderAdminPanel() {
-            const tabs = ['Settings', 'Menu Items'];
-            const content = appState.activeAdminTab === 'Settings' ? renderAdminSettingsTab() : renderAdminMenuItemsTab();
-
-            const header = `
-                <div class="p-4 border-b border-gray-200 flex justify-between items-center">
-                    <h2 class="text-2xl font-bold text-gray-900">Admin Panel</h2>
-                    ${Button({ variant: 'outline', onClick: 'exitAdminMode()', children: '<i data-lucide="log-out" class="w-4 h-4 mr-2"></i> Exit Admin' })}
-                </div>
-                
-                <div class="flex border-b border-gray-200">
-                    ${tabs.map(tab => `
-                        <button onclick="setAdminTab('${tab}')" class="px-6 py-3 font-semibold transition-colors ${appState.activeAdminTab === tab ? 'border-b-2 border-gray-800 text-gray-900' : 'text-gray-500 hover:text-gray-700'}">
-                            ${tab}
-                        </button>
-                    `).join('')}
-                </div>
-            `;
+                `;
+            },
             
-            return `
-                <div class="min-h-screen bg-neutral-100 p-4 sm:p-8">
-                    <div class="max-w-7xl mx-auto bg-white rounded-xl shadow-xl">
-                        ${header}
-                        ${content}
-                    </div>
-                    ${appState.isItemEditorOpen ? renderItemEditorModal() : ''}
-                </div>
-            `;
-        }
-
-        window.setAdminTab = function(tab) {
-            setState({ activeAdminTab: tab });
-        }
-        
-        window.exitAdminMode = function() {
-            setState({ isAdminMode: false });
-        }
-        
-        // --- ORDER SUMMARY VIEW ---
-
-        function renderOrderSummary() {
-            const { subtotal, tax, total } = getCartTotals();
-            const taxRate = 0.10;
-
-            return `
-                <div class="min-h-screen bg-gray-100 flex items-center justify-center p-4">
-                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-8 text-center space-y-6">
-                        <div class="flex flex-col items-center">
-                            <i data-lucide="check-circle" class="w-12 h-12 text-green-500"></i>
-                            <h2 class="text-2xl font-bold text-gray-900 mt-2">Order Submitted</h2>
-                        </div>
+            renderCart() {
+                const { subtotal, tax, total } = this.getCartTotal();
+                const settings = this.settings;
+                
+                return `
+                    <div class="p-4 bg-gray-50 border-t border-gray-200">
+                        <h2 class="text-xl font-bold mb-3">Your Order (${this.cart.length} items)</h2>
                         
-                        <div class="bg-white border rounded-lg p-4 text-left space-y-3">
-                            <h3 class="font-bold text-gray-700 border-b pb-2">Order Details</h3>
-                            ${appState.cart.map(item => `
-                                <div class="flex justify-between text-sm text-gray-600">
-                                    <span class="truncate pr-2">${item.name} x${item.quantity}</span>
-                                    <span>$${formatPrice(item.price * item.quantity)}</span>
+                        <div class="space-y-3 max-h-64 overflow-y-auto mb-4 pr-2">
+                            ${this.cart.length === 0 ? '<p class="text-gray-500 text-sm">Your order is empty.</p>' : ''}
+                            ${this.cart.map(item => `
+                                <div class="flex justify-between items-start bg-white p-3 rounded-lg shadow-sm">
+                                    <div class="flex-grow">
+                                        <p class="font-semibold text-gray-800">${item.name}</p>
+                                        <p class="text-xs text-gray-500 mt-1">${settings.currencySymbol}${item.price.toFixed(2)}</p>
+                                    </div>
+                                    <button data-remove-cart-id="${item.cartId}"
+                                        class="ml-3 text-red-500 hover:text-red-700 transition duration-150 ease-in-out text-sm font-medium">
+                                        Remove
+                                    </button>
                                 </div>
                             `).join('')}
                         </div>
-                        
-                        <div class="text-gray-700 text-sm space-y-1">
-                            <div class="flex justify-between">
-                                <span>Subtotal:</span>
-                                <span>$${formatPrice(subtotal)}</span>
+
+                        <div class="space-y-1 pt-4 border-t border-gray-200">
+                            <div class="flex justify-between text-sm">
+                                <span class="text-gray-600">Subtotal:</span>
+                                <span class="font-medium">${settings.currencySymbol}${subtotal.toFixed(2)}</span>
                             </div>
-                            <div class="flex justify-between">
-                                <span>Tax (${(taxRate * 100).toFixed(0)}%):</span>
-                                <span>$${formatPrice(tax)}</span>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-gray-600">Tax (${settings.taxRate}%):</span>
+                                <span class="font-medium">${settings.currencySymbol}${tax.toFixed(2)}</span>
                             </div>
-                            <div class="flex justify-between text-xl font-bold text-gray-900 pt-2 border-t border-gray-200 mt-2">
+                            <div class="flex justify-between text-xl font-bold pt-2 border-t border-gray-200 mt-2">
                                 <span>Total:</span>
-                                <span>$${formatPrice(total)}</span>
+                                <span>${settings.currencySymbol}${total.toFixed(2)}</span>
                             </div>
                         </div>
 
-                        <p class="text-sm text-gray-500">
-                            Your order will be delivered to Table <span class="font-bold text-gray-800">${appState.kioskData.tableNumber}</span>.
-                        </p>
-                        
-                        ${Button({ onClick: 'startNewOrder()', className: 'w-full', size: 'lg', children: 'Start New Order' })}
-
-                        <p class="text-xs text-gray-400">Please hand this device to staff for processing</p>
+                        <button id="submit-order-btn"
+                            ${this.cart.length === 0 ? 'disabled' : ''}
+                            class="mt-4 w-full bg-green-600 text-white py-3 rounded-xl font-bold text-lg hover:bg-green-700 disabled:bg-gray-400 transition duration-150 ease-in-out shadow-md shadow-green-500/50">
+                            Submit Order
+                        </button>
                     </div>
-                </div>
-            `;
-        }
-        
-        window.startNewOrder = function() {
-            setState({ orderSubmitted: false, cart: [] });
-        }
+                `;
+            },
 
-
-        // --- PIN DIALOG ---
-        function renderPinDialog() {
-            if (!appState.modalOpen || appState.modalType !== 'pin') return '';
-
-            return Modal({
-                title: 'Admin Access',
-                onClose: 'closeModal()',
-                children: `
-                    <div class="p-6 space-y-6">
-                        <p class="text-gray-500 text-sm text-center">Enter PIN to access management features.</p>
-                        
-                        <input
-                            type="password"
-                            inputmode="numeric"
-                            maxlength="${appState.kioskData.adminPin.length}"
-                            value="${appState.pinInput}"
-                            oninput="updatePinInput(this.value)"
-                            placeholder="_____"
-                            class="w-full text-center text-4xl tracking-widest p-4 rounded-lg border-2 focus:outline-none ${appState.pinError ? 'border-red-500' : 'border-gray-300 focus:border-indigo-500'}"
-                        />
-
-                        ${appState.pinError ? `
-                            <p class="text-red-500 text-sm text-center flex items-center justify-center">
-                                <i data-lucide="alert-triangle" class="w-4 h-4 mr-1"></i> Incorrect PIN.
-                            </p>
-                        ` : ''}
-                        
-                        <div class="flex justify-between gap-3 pt-2">
-                            ${Button({ variant: 'outline', onClick: 'closeModal()', className: 'flex-1', children: 'Cancel' })}
-                            ${Button({ onClick: 'submitPin()', disabled: appState.pinInput.length !== appState.kioskData.adminPin.length, className: 'flex-1', children: 'Enter' })}
-                        </div>
+            renderAdminPanel() {
+                const settings = this.settings;
+                return `
+                    <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-white sticky top-0 z-10">
+                        <h1 class="text-2xl font-bold text-gray-800">Admin Panel</h1>
+                        <button id="exit-admin-btn" class="bg-red-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-red-600 transition duration-150">
+                            Exit Admin
+                        </button>
                     </div>
-                `
-            });
-        }
-        
-        window.openPinDialog = function() {
-            setState({ modalOpen: true, modalType: 'pin', pinInput: '', pinError: false });
-        }
 
-        window.updatePinInput = function(value) {
-            const pin = value.replace(/\D/g, ''); // Only digits
-            if (pin.length <= appState.kioskData.adminPin.length) {
-                appState.pinInput = pin;
-                appState.pinError = false;
-                renderApp(); // Force re-render for input value and error state
-            }
-        }
-        
-        window.submitPin = function() {
-            if (appState.pinInput === appState.kioskData.adminPin) {
-                setState({ modalOpen: false, modalType: null, pinInput: '', isAdminMode: true });
-            } else {
-                setState({ pinError: true, pinInput: '' });
-            }
-        }
-        
-        window.closeModal = function() {
-            setState({ modalOpen: false, modalType: null, pinInput: '', pinError: false, itemToCustomize: null });
-        }
-        
-        // --- CUSTOMIZATION DIALOG ---
-        
-        function renderCustomizationDialog() {
-            if (!appState.modalOpen || appState.modalType !== 'customize' || !appState.itemToCustomize) return '';
-            
-            const item = appState.itemToCustomize;
-            
-            // Temporary state for the modal's internal logic
-            let selectedOptions = item.tempSelectedOptions || (item.customizationOptions?.filter(opt => opt.default).map(opt => opt.name) || []);
-            let quantity = item.tempQuantity || 1;
-            
-            const hasCustomizations = item.customizationOptions && item.customizationOptions.length > 0;
-            const currentTotal = item.price * quantity;
-
-            // Update temporary state and re-render the app
-            window.toggleOption = function(name) {
-                const index = selectedOptions.indexOf(name);
-                if (index > -1) {
-                    selectedOptions.splice(index, 1);
-                } else {
-                    selectedOptions.push(name);
-                }
-                item.tempSelectedOptions = selectedOptions;
-                renderApp();
-            }
-
-            window.updateQuantity = function(delta) {
-                const newQuantity = Math.max(1, quantity + delta);
-                item.tempQuantity = newQuantity;
-                renderApp();
-            }
-
-            window.handleAdd = function() {
-                for (let i = 0; i < quantity; i++) {
-                    addToCart(item, selectedOptions);
-                }
-                closeModal();
-            }
-            
-            // Since this modal is generated by renderApp, we need to manually update temp state
-            if (!item.tempSelectedOptions) item.tempSelectedOptions = selectedOptions;
-            if (!item.tempQuantity) item.tempQuantity = quantity;
-
-            return Modal({
-                title: 'Customize Your Order',
-                onClose: 'closeModal()',
-                children: `
-                    <div class="p-6 max-h-[70vh] overflow-y-auto">
-                        <div class="flex space-x-4 mb-4 items-start">
-                            <img src="${item.image}" alt="${item.name}" class="w-20 h-20 object-cover rounded-lg flex-shrink-0" onerror="this.onerror=null;this.src='https://placehold.co/100x100/A0AEC0/FFFFFF?text=${item.name.slice(0, 1)}';" />
-                            <div class="flex-1">
-                                <p class="font-bold text-lg text-gray-800">${item.name}</p>
-                                <p class="text-gray-500 text-sm">$${formatPrice(item.price)}</p>
-                                <p class="text-gray-600 text-sm mt-1">${item.description}</p>
+                    <div class="p-4 space-y-8">
+                        <!-- Settings Management -->
+                        <div class="card p-6 bg-white rounded-xl">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-xl font-semibold">Kiosk Settings</h2>
+                                <button id="edit-settings-btn" class="text-indigo-600 hover:text-indigo-800 font-medium">
+                                    Edit Settings
+                                </button>
+                            </div>
+                            <div class="space-y-2 text-sm text-gray-700">
+                                <p><strong>Kiosk Name:</strong> ${settings.kioskName}</p>
+                                <p><strong>Table Number:</strong> ${settings.tableNumber}</p>
+                                <p><strong>Admin PIN (DO NOT SHARE):</strong> ****</p>
+                                <p><strong>Tax Rate:</strong> ${settings.taxRate}%</p>
+                                <p><strong>Currency:</strong> ${settings.currencySymbol}</p>
                             </div>
                         </div>
 
-                        <div class="space-y-3 pt-4 border-t border-gray-100">
-                            <h4 class="text-md font-semibold text-gray-700">Options (Click to add/remove ingredients)</h4>
+                        <!-- Menu Management -->
+                        <div class="card p-6 bg-white rounded-xl">
+                            <div class="flex justify-between items-center mb-4">
+                                <h2 class="text-xl font-semibold">Menu Items (${this.menuItems.length})</h2>
+                                <button class="bg-indigo-600 text-white py-2 px-4 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150" onclick="window.app.openModal('add-item')">
+                                    Add New Item
+                                </button>
+                            </div>
                             
-                            ${!hasCustomizations ? `
-                                <div class="text-center py-4 bg-gray-50 rounded-lg text-gray-500 text-sm">No customization options available.</div>
-                            ` : `
-                                <div class="space-y-2">
-                                    ${item.customizationOptions.map(option => `
-                                        <div onclick="toggleOption('${option.name.replace(/'/g, "\\'")}')" class="flex items-center justify-between cursor-pointer p-2 rounded-lg hover:bg-gray-100 transition">
-                                            <span class="text-gray-700">${option.name}</span>
-                                            <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition ${selectedOptions.includes(option.name) ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-gray-300'}">
-                                                ${selectedOptions.includes(option.name) ? '<i data-lucide="check-circle" class="w-3 h-3 text-white fill-indigo-600"></i>' : ''}
-                                            </div>
+                            <div class="space-y-4">
+                                ${this.menuItems.map(item => `
+                                    <div class="flex justify-between items-center p-3 border-b last:border-b-0">
+                                        <div class="flex-grow">
+                                            <p class="font-semibold text-gray-800">${item.name}</p>
+                                            <p class="text-sm text-gray-500">${settings.currencySymbol}${item.price.toFixed(2)} (${item.categoryId})</p>
                                         </div>
-                                    `).join('')}
+                                        <div class="flex space-x-2">
+                                            <button onclick="window.app.openModal('edit-item', '${item.id}')" class="text-indigo-600 hover:text-indigo-800 p-2 rounded-full hover:bg-indigo-100 transition">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-7-7l4-4m6 6L13 10m3-4a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                                            </button>
+                                            <button data-delete-item-id="${item.id}" class="text-red-500 hover:text-red-700 p-2 rounded-full hover:bg-red-100 transition">
+                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m4-10H5m4-2a1 1 0 011-1h4a1 1 0 011 1v2h-6V5z"></path></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Categories Management -->
+                        <div class="card p-6 bg-white rounded-xl">
+                            <h2 class="text-xl font-semibold mb-4">Categories</h2>
+                            <p class="text-sm text-gray-500 mb-4">Category management is disabled in this basic version to maintain stability.</p>
+                            <div class="space-y-2">
+                                ${settings.categories.filter(c => c.id !== 'all').map(cat => `
+                                    <div class="flex justify-between items-center p-3 border rounded-lg">
+                                        <span class="font-medium">${cat.name}</span>
+                                        <span class="text-sm text-gray-500">Fixed</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            },
+
+            renderModal() {
+                if (!this.modal.visible) return '';
+                const settings = this.settings;
+                let content = '';
+                let title = '';
+
+                switch (this.modal.type) {
+                    case 'admin-login':
+                        title = "Admin Access";
+                        content = `
+                            <form id="admin-login-form" class="space-y-4">
+                                <p class="text-sm text-gray-500">Enter the Admin PIN to access management features. (Default: 1234)</p>
+                                <input type="password" id="admin-pin-input" required maxlength="4" placeholder="••••"
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg text-center tracking-widest focus:ring-indigo-500 focus:border-indigo-500">
+                                <div class="flex justify-end space-x-3 pt-2">
+                                    <button type="button" class="modal-close-btn text-gray-600 hover:text-gray-800 py-2 px-4 rounded-lg">Cancel</button>
+                                    <button type="submit" class="bg-indigo-600 text-white py-3 px-6 rounded-lg font-bold hover:bg-indigo-700 transition">Enter</button>
                                 </div>
-                            `}
-                        </div>
-                    </div>
+                            </form>
+                        `;
+                        break;
 
-                    <div class="p-6 pt-4 flex justify-between items-center gap-4 border-t">
-                        <div class="flex items-center space-x-3">
-                            ${Button({ 
-                                variant: 'outline', 
-                                size: 'icon', 
-                                onClick: 'updateQuantity(-1)',
-                                disabled: quantity <= 1,
-                                children: '<i data-lucide="minus" class="w-4 h-4"></i>'
-                            })}
-                            <span class="text-lg font-bold w-8 text-center">${quantity}</span>
-                            ${Button({ 
-                                variant: 'outline', 
-                                size: 'icon', 
-                                onClick: 'updateQuantity(1)',
-                                children: '<i data-lucide="plus" class="w-4 h-4"></i>'
-                            })}
-                        </div>
-                        
-                        ${Button({ 
-                            onClick: 'handleAdd()',
-                            className: 'w-full sm:w-auto',
-                            size: 'lg',
-                            children: `Add to Cart - $${formatPrice(currentTotal)}`
-                        })}
-                    </div>
-                `
-            });
-        }
-        
-        // --- CART MANAGEMENT ---
-        
-        window.addToCart = function(item, selectedCustomizations) {
-            const existingItem = appState.cart.find(
-                (cartItem) =>
-                    cartItem.id === item.id &&
-                    JSON.stringify(cartItem.selectedCustomizations.sort()) === JSON.stringify(selectedCustomizations.sort())
-            );
-            
-            if (existingItem) {
-                appState.cart = appState.cart.map(cartItem =>
-                    cartItem.cartItemId === existingItem.cartItemId
-                        ? { ...cartItem, quantity: cartItem.quantity + 1 }
-                        : cartItem
-                );
-            } else {
-                appState.cart.push({
-                    ...item,
-                    quantity: 1,
-                    selectedCustomizations,
-                    cartItemId: Date.now().toString() + Math.random(),
-                });
-            }
-            renderApp();
-        }
-        
-        window.removeFromCart = function(cartItemId) {
-            appState.cart = appState.cart.filter(item => item.cartItemId !== cartItemId);
-            renderApp();
-        }
-
-        window.updateCartQuantity = function(cartItemId, quantity) {
-            if (quantity <= 0) {
-                removeFromCart(cartItemId);
-                return;
-            }
-            appState.cart = appState.cart.map(item =>
-                item.cartItemId === cartItemId
-                    ? { ...item, quantity }
-                    : item
-            );
-            renderApp();
-        }
-
-        window.openCart = function() { setState({ isCartOpen: true }); }
-        window.closeCart = function() { setState({ isCartOpen: false }); }
-        window.submitOrder = function() { setState({ orderSubmitted: true, isCartOpen: false }); }
-
-        // --- CART DRAWER ---
-
-        function renderCartDrawer() {
-            if (!appState.isCartOpen) return '';
-            
-            const { subtotal, tax, total } = getCartTotals();
-            const taxRate = 0.10;
-            
-            const cartItemsHtml = appState.cart.length === 0 ? `
-                <div class="text-center text-gray-500 py-12">
-                    <p class="text-lg">Your cart is empty</p>
-                    <p class="text-sm mt-1">Add items from the menu.</p>
-                </div>
-            ` : appState.cart.map(item => `
-                <div class="flex py-3 border-b border-gray-100">
-                    <img src="${item.image}" alt="${item.name}" class="w-16 h-16 object-cover rounded-md mr-3 flex-shrink-0" onerror="this.onerror=null;this.src='https://placehold.co/100x100/A0AEC0/FFFFFF?text=${item.name.slice(0, 1)}';" />
-                    <div class="flex-grow">
-                        <p class="font-semibold text-gray-800">${item.name}</p>
-                        <p class="text-sm text-gray-500">$${formatPrice(item.price)} each</p>
-                        ${item.selectedCustomizations && item.selectedCustomizations.length > 0 ? `
-                            <p class="text-xs text-indigo-600 italic mt-1">Custom: ${item.selectedCustomizations.join(', ')}</p>
-                        ` : ''}
-                    </div>
-                    
-                    <div class="flex flex-col items-end justify-between ml-2">
-                        ${Button({ 
-                            variant: 'ghost', size: 'icon', className: 'text-red-500 hover:bg-red-50', 
-                            onClick: `removeFromCart('${item.cartItemId}')`, 
-                            children: '<i data-lucide="trash-2" class="w-4 h-4"></i>' 
-                        })}
-                        <div class="flex items-center space-x-1 mt-auto">
-                            ${Button({ 
-                                variant: 'outline', size: 'icon', className: 'w-6 h-6',
-                                onClick: `updateCartQuantity('${item.cartItemId}', ${item.quantity - 1})`,
-                                children: '<i data-lucide="minus" class="w-3 h-3"></i>'
-                            })}
-                            <span class="w-4 text-center text-sm font-medium text-gray-700">${item.quantity}</span>
-                            ${Button({ 
-                                variant: 'outline', size: 'icon', className: 'w-6 h-6',
-                                onClick: `updateCartQuantity('${item.cartItemId}', ${item.quantity + 1})`,
-                                children: '<i data-lucide="plus" class="w-3 h-3"></i>'
-                            })}
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-
-            return `
-                <div class="fixed inset-0 z-50 transition-opacity">
-                    <div class="absolute inset-0 bg-black bg-opacity-40" onclick="closeCart()"></div>
-                    <div class="absolute right-0 top-0 bottom-0 bg-white w-full sm:max-w-md shadow-2xl flex flex-col transition-transform duration-300 translate-x-0">
-                        <div class="p-4 flex justify-between items-center border-b border-gray-200">
-                            <h2 class="text-xl font-bold text-gray-900">Your Order</h2>
-                            ${Button({ variant: 'ghost', size: 'icon', onClick: 'closeCart()', children: '<i data-lucide="x" class="w-5 h-5"></i>' })}
-                        </div>
-
-                        <div class="flex-grow px-4 py-2 overflow-y-auto space-y-1">
-                            ${cartItemsHtml}
-                        </div>
-
-                        <div class="p-4 border-t border-gray-200 bg-gray-50">
-                            <div class="space-y-2 mb-4 text-gray-700 text-sm">
-                                <div class="flex justify-between">
-                                    <span>Subtotal:</span>
-                                    <span>$${formatPrice(subtotal)}</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span>Tax (10%):</span>
-                                    <span>$${formatPrice(tax)}</span>
-                                </div>
-                                <div class="flex justify-between text-xl font-bold text-gray-900 pt-2 border-t border-gray-300">
-                                    <span>Total:</span>
-                                    <span>$${formatPrice(total)}</span>
+                    case 'order-submit':
+                        const total = this.getCartTotal().total;
+                        title = "Confirm Order";
+                        content = `
+                            <div class="text-center space-y-4">
+                                <p class="text-lg font-semibold">You are about to submit an order for:</p>
+                                <p class="text-4xl font-bold text-indigo-600">${settings.currencySymbol}${total.toFixed(2)}</p>
+                                <p class="text-gray-500">Please confirm payment and submit the order.</p>
+                                <div class="flex justify-center space-x-4 pt-4">
+                                    <button type="button" class="modal-close-btn bg-gray-300 text-gray-800 py-3 px-6 rounded-lg font-bold hover:bg-gray-400 transition">Cancel</button>
+                                    <button id="confirm-order-btn" class="bg-green-600 text-white py-3 px-6 rounded-lg font-bold hover:bg-green-700 transition">Confirm & Submit</button>
                                 </div>
                             </div>
-                            
-                            ${Button({ 
-                                onClick: 'submitOrder()',
-                                className: 'w-full',
-                                size: 'lg',
-                                disabled: appState.cart.length === 0,
-                                children: 'Submit Order'
-                            })}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-
-        // --- MENU VIEW ---
-        
-        function renderMenuCard(item) {
-            const hasCustomizations = item.customizationOptions && item.customizationOptions.length > 0;
-            
-            const handleCardClick = hasCustomizations 
-                ? `openCustomization('${item.id}')` 
-                : `addToCartById('${item.id}', [])`;
-            
-            return `
-                <div class="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col transition-all duration-300 transform hover:shadow-xl cursor-pointer">
-                    <div class="relative">
-                        <img src="${item.image}" alt="${item.name}" class="w-full h-48 object-cover" onerror="this.onerror=null;this.src='https://placehold.co/600x400/9CA3AF/FFFFFF?text=${item.name.replace(/\s/g, '+')}';" />
-                        <div class="absolute top-0 right-0 bg-gray-900 text-white px-3 py-1 rounded-bl-lg font-bold text-lg">
-                            $${formatPrice(item.price)}
-                        </div>
-                    </div>
-                    <div class="p-4 flex flex-col flex-grow">
-                        <h3 class="text-lg font-bold text-gray-800 mb-1">${item.name}</h3>
-                        <p class="text-gray-500 text-sm flex-grow line-clamp-2">${item.description}</p>
-                        
-                        ${Button({ 
-                            onClick: handleCardClick,
-                            size: 'sm',
-                            className: 'mt-3 w-full justify-center bg-indigo-600 hover:bg-indigo-700',
-                            children: `<i data-lucide="plus-circle" class="w-4 h-4 mr-2"></i> ${hasCustomizations ? 'Customize & Add' : 'Add to Cart'}`
-                        })}
-                    </div>
-                </div>
-            `;
-        }
-        
-        window.addToCartById = function(itemId, customizations) {
-            const item = appState.kioskData.menuItems.find(i => i.id === itemId);
-            if (item) addToCart(item, customizations);
-        }
-        
-        window.openCustomization = function(itemId) {
-            const item = appState.kioskData.menuItems.find(i => i.id === itemId);
-            if (item) {
-                // Initialize temporary state for the modal
-                item.tempSelectedOptions = item.customizationOptions?.filter(opt => opt.default).map(opt => opt.name) || [];
-                item.tempQuantity = 1;
-
-                setState({ modalOpen: true, modalType: 'customize', itemToCustomize: item });
-            }
-        }
-
-        function renderMenuView() {
-            const allCategories = ['All', ...appState.kioskData.categories];
-            
-            const filteredItems = appState.kioskData.menuItems.filter(item => 
-                appState.activeCategory === 'All' || item.category === appState.activeCategory
-            );
-
-            const groupedItems = filteredItems.reduce((acc, item) => {
-                const category = item.category || 'Other';
-                if (!acc[category]) { acc[category] = []; }
-                acc[category].push(item);
-                return acc;
-            }, {});
-            
-            let menuContent = Object.keys(groupedItems).length === 0 ? `
-                <div class="text-center p-12 text-gray-500">No items found in this category.</div>
-            ` : Object.keys(groupedItems).map(category => `
-                <section>
-                    ${appState.activeCategory === 'All' ? `
-                        <h2 class="text-2xl font-extrabold text-gray-900 mb-6 border-b-2 border-gray-200 pb-2">${category}</h2>
-                    ` : ''}
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                        ${groupedItems[category].map(renderMenuCard).join('')}
-                    </div>
-                </section>
-            `).join('<div class="h-12"></div>');
-
-
-            return `
-                <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-                    <!-- Category Navigation -->
-                    <div class="flex space-x-2 border-b border-gray-200 pb-2 overflow-x-auto mb-6 sticky top-[5.25rem] bg-neutral-50 z-30">
-                        ${allCategories.map(category => `
-                            ${Button({
-                                variant: appState.activeCategory === category ? 'default' : 'ghost',
-                                onClick: `setCategory('${category}')`,
-                                className: `text-sm whitespace-nowrap ${appState.activeCategory === category ? 'bg-gray-800 text-white' : 'text-gray-600 hover:bg-gray-200'}`,
-                                children: category
-                            })}
-                        `).join('')}
-                    </div>
+                        `;
+                        break;
                     
-                    <div class="space-y-12">
-                        ${menuContent}
+                    case 'order-submitted':
+                        title = "Order Submitted!";
+                        content = `
+                            <div class="text-center space-y-4 p-6">
+                                <svg class="w-16 h-16 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                <h3 class="text-2xl font-bold text-gray-800">Thank You!</h3>
+                                <p class="text-gray-600">Your order has been sent to the kitchen.</p>
+                                <div class="mt-4 p-4 bg-gray-100 rounded-lg">
+                                    <p class="font-semibold">Order Details:</p>
+                                    ${this.modal.data.order.map(item => `<p class="text-sm text-gray-700">${item.name} (${settings.currencySymbol}${item.price.toFixed(2)})</p>`).join('')}
+                                    <p class="text-lg font-bold mt-2">Total: ${settings.currencySymbol}${this.modal.data.total.total.toFixed(2)}</p>
+                                </div>
+                                <button type="button" class="modal-close-btn mt-6 w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition">Start New Order</button>
+                            </div>
+                        `;
+                        break;
+
+                    case 'edit-settings':
+                        title = "Edit Kiosk Settings";
+                        const s = this.modal.data;
+                        content = `
+                            <form id="settings-form" class="space-y-4">
+                                <div>
+                                    <label for="kioskName" class="block text-sm font-medium text-gray-700">Kiosk Name</label>
+                                    <input type="text" id="kioskName" value="${s.kioskName}" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                                </div>
+                                <div>
+                                    <label for="tableNumber" class="block text-sm font-medium text-gray-700">Table Number</label>
+                                    <input type="text" id="tableNumber" value="${s.tableNumber}" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                                </div>
+                                <div>
+                                    <label for="adminPin" class="block text-sm font-medium text-gray-700">Admin PIN</label>
+                                    <input type="text" id="adminPin" value="${s.adminPin}" required maxlength="4" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                                    <p class="text-xs text-red-500 mt-1">Changing the PIN is NOT recommended and may cause login issues!</p>
+                                </div>
+                                <div>
+                                    <label for="taxRate" class="block text-sm font-medium text-gray-700">Tax Rate (%)</label>
+                                    <input type="number" id="taxRate" value="${s.taxRate}" required class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                                </div>
+                                <div>
+                                    <label for="currencySymbol" class="block text-sm font-medium text-gray-700">Currency Symbol</label>
+                                    <input type="text" id="currencySymbol" value="${s.currencySymbol}" required maxlength="3" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                                </div>
+                                <div class="flex justify-end space-x-3 pt-2">
+                                    <button type="button" class="modal-close-btn text-gray-600 hover:text-gray-800 py-2 px-4 rounded-lg">Cancel</button>
+                                    <button type="submit" class="bg-indigo-600 text-white py-3 px-6 rounded-lg font-bold hover:bg-indigo-700 transition">Save Settings</button>
+                                </div>
+                            </form>
+                        `;
+                        break;
+                    
+                    case 'message':
+                        title = this.modal.message.title;
+                        content = `
+                            <div class="text-center space-y-4">
+                                <p class="text-lg text-gray-600">${this.modal.message.text}</p>
+                                <button type="button" class="modal-close-btn mt-4 bg-indigo-600 text-white py-2 px-4 rounded-lg font-bold hover:bg-indigo-700 transition">Close</button>
+                            </div>
+                        `;
+                        break;
+
+                    case 'add-item':
+                    case 'edit-item':
+                        // Placeholder for menu item CRUD (requires more complex state management, simplified here)
+                        title = this.modal.type === 'add-item' ? 'Add New Menu Item' : 'Edit Menu Item (Feature Disabled)';
+                        content = `
+                            <div class="text-center p-6 bg-yellow-50 rounded-lg">
+                                <h3 class="text-xl font-bold text-yellow-800">Feature Disabled</h3>
+                                <p class="text-gray-600 mt-2">Menu Item editing/adding has been disabled to simplify the code and prevent errors during setup.</p>
+                                <p class="text-sm text-gray-500 mt-1">Please manually edit the default items in the code file if needed.</p>
+                                <button type="button" class="modal-close-btn mt-4 bg-gray-300 text-gray-800 py-2 px-4 rounded-lg font-bold hover:bg-gray-400 transition">Close</button>
+                            </div>
+                        `;
+                        break;
+                }
+
+                return `
+                    <div class="fixed inset-0 modal-bg z-50 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all duration-300">
+                            <!-- Modal Header -->
+                            <div class="p-4 border-b flex justify-between items-center">
+                                <h3 class="text-xl font-semibold text-gray-800">${title}</h3>
+                                <button type="button" class="modal-close-btn text-gray-500 hover:text-gray-900">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                            </div>
+                            <!-- Modal Body -->
+                            <div class="p-6">
+                                ${content}
+                            </div>
+                        </div>
                     </div>
-                </div>
-                ${renderPinDialog()}
-                ${renderCustomizationDialog()}
-            `;
-        }
-
-        window.setCategory = function(category) {
-            setState({ activeCategory: category });
-        }
-
-
-        // --- MAIN APP RENDERER ---
-
-        function renderMainApp() {
-            const { totalItems } = getCartTotals();
-            const kiosk = appState.kioskData;
+                `;
+            },
             
-            const header = `
-                <header class="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
-                    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-                        <div class="flex flex-col">
-                            <h1 class="text-2xl font-bold text-gray-900">${kiosk.kioskName}</h1>
-                            ${kiosk.tableNumber ? `
-                                <p class="text-gray-500 text-sm font-medium">
-                                    Table: <span class="text-gray-800 font-semibold">${kiosk.tableNumber}</span>
-                                </p>
-                            ` : ''}
+            renderApp() {
+                return `
+                    <div class="app-container">
+                        ${this.view === 'menu' ? this.renderHeader() : ''}
+                        <div class="main-content">
+                            ${this.view === 'menu' ? this.renderMenu() : this.renderAdminPanel()}
                         </div>
-                        <div class="flex items-center gap-3">
-                            ${Button({
-                                variant: 'outline',
-                                size: 'icon',
-                                onClick: 'openPinDialog()',
-                                children: '<i data-lucide="settings" class="w-5 h-5"></i>'
-                            })}
-                            ${Button({
-                                variant: 'default',
-                                onClick: 'openCart()',
-                                className: 'relative px-6 bg-gray-900 hover:bg-gray-700',
-                                children: `
-                                    <i data-lucide="shopping-cart" class="w-5 h-5 mr-2"></i>
-                                    Cart
-                                    ${totalItems > 0 ? `
-                                        <span class="absolute -top-2 -right-2 bg-indigo-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-bold shadow-lg ring-2 ring-white">
-                                            ${totalItems}
-                                        </span>
-                                    ` : ''}
-                                `
-                            })}
-                        </div>
+                        ${this.view === 'menu' ? this.renderCart() : ''}
+                        ${this.renderModal()}
                     </div>
-                </header>
-            `;
-
-            return `
-                <div class="min-h-screen bg-neutral-50 font-sans">
-                    ${header}
-                    ${renderMenuView()}
-                    ${renderCartDrawer()}
-                </div>
-            `;
-        }
-
-        function renderApp() {
-            const appElement = document.getElementById('app');
-            if (appState.orderSubmitted) {
-                appElement.innerHTML = renderOrderSummary();
-            } else if (appState.isAdminMode) {
-                appElement.innerHTML = renderAdminPanel();
-            } else {
-                appElement.innerHTML = renderMainApp();
+                `;
             }
-            renderIcons(); // Re-render icons after changing innerHTML
+        };
+
+        // --- Database Helpers ---
+        async function updateSettings(newSettings) {
+            try {
+                const settingsDocRef = window.fb.dbRef(`artifacts/${window.fb.appId}/public/data/settings/app`);
+                await updateDoc(settingsDocRef, newSettings);
+                console.log("Settings updated successfully.");
+                window.app.modal.message = { title: "Success", text: "Settings saved successfully." };
+                window.app.openModal('message');
+            } catch (error) {
+                console.error("Error updating settings:", error);
+                window.app.modal.message = { title: "Error", text: `Failed to save settings: ${error.message}` };
+                window.app.openModal('message');
+            }
         }
         
-        // --- INITIALIZATION ---
-        window.onload = function() {
-            // Check for initial local storage data
-            if (!localStorage.getItem('kioskData')) {
-                saveKioskData(); // Save initial defaults if local storage is empty
+        async function deleteMenuItem(itemId) {
+            try {
+                const itemDocRef = window.fb.dbRef(`artifacts/${window.fb.appId}/public/data/menu/${itemId}`);
+                await deleteDoc(itemDocRef);
+                console.log(`Item ${itemId} deleted.`);
+            } catch (error) {
+                console.error("Error deleting item:", error);
+                window.app.modal.message = { title: "Error", text: `Failed to delete item: ${error.message}` };
+                window.app.openModal('message');
             }
-            renderApp();
-        };
+        }
+
+
+        // Initialize on load
+        window.onload = initializeFirebase;
     </script>
+</head>
+<body>
+    <div id="app-container">
+        <div id="app-status" class="text-center p-8 text-gray-500">
+            Loading Kiosk System...
+        </div>
+    </div>
 </body>
 </html>
 
