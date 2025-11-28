@@ -43,7 +43,7 @@
         let appState = {
             kioskData: JSON.parse(localStorage.getItem('kioskData')) || INITIAL_KIOSK_DATA,
             cart: [],
-            isAdminMode: false,
+            isAdminMode: true,
             isCartOpen: false,
             orderSubmitted: false,
             activeCategory: 'All',
@@ -1123,3 +1123,4 @@
     </script>
 </body>
 </html>
+
